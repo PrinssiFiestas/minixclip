@@ -28,6 +28,8 @@ minixclip [FILE]
 
 If data is given trough standard input, then it will be copied to clipboard. Otherwise, if file argument is passed, then it's contents will be copied to clipboard, otherwise pastes clipboard contents to standard output. 
 
+# How to Implement Copy and Paste with X11 Clipboard
+
 ## Basic Overview of X11 Clipboard
 
 X11 doesn't have a single clipboard, it can have arbitrary number of clipboards called *selections*. We will be referring to clipboards mostly as selections from now on. The three standardized selections are 
