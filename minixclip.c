@@ -21,6 +21,7 @@ Window   g_window;
 Atom CLIPBOARD;      // selection
 Atom UTF8_STRING;    // selection type
 Atom MINIXCLIPBOARD; // selection contents
+Atom TARGETS;        // supported selection targets
 
 #define fail(...) exit(!!fprintf(stderr, "minixclip: "__VA_ARGS__))
 
@@ -30,6 +31,7 @@ void close_display(void)
     XCloseDisplay(g_display);
 }
 
+// Request clipboard contents from whoever is the X11 client currently owning it.
 void clipboard_to_output(void)
 {
     atexit(close_display);
@@ -43,7 +45,6 @@ void clipboard_to_output(void)
     XConvertSelection(
         g_display, CLIPBOARD, UTF8_STRING, MINIXCLIPBOARD, g_window, CurrentTime);
     XFlush(g_display);
-
 
     while (true) {
         XEvent event;
@@ -80,11 +81,75 @@ void clipboard_to_output(void)
     // cleanup
     XFree(data);
     XDeleteProperty(g_display, g_window, MINIXCLIPBOARD);
+    exit(EXIT_SUCCESS);
 }
 
+// Claim ownership of clipboard and send data to whoever requests clipboard
+// contents until some other X11 client claims clipboard ownership.
 void input_to_clipboard(const char data[], size_t data_length)
 {
-    fail("Not implemented...\n");
+    // Claim clipboard ownership. Note that ICCCM compliance would require not
+    // using CurrentTime, but it seems to be working fine. xclip does this too
+    // and nobody has complained.
+    XSetSelectionOwner(g_display, CLIPBOARD, g_window, CurrentTime);
+    if (g_window != XGetSelectionOwner(g_display, CLIPBOARD)) {
+        XCloseDisplay(g_display);
+        fail("Failed to acquire clipboard ownership.");
+    }
+
+    // We need to serve SelectionRequest events until another X11 client claims
+    // clipboard ownership. Therefore, we must become daemons by forking and
+    // killing our parents, so that the shell won't mess with us.
+    if (fork() != 0) {
+        XSetSelectionOwner(g_display, CLIPBOARD, None, CurrentTime);
+        exit(EXIT_SUCCESS);
+    }
+    atexit(close_display);
+
+    // Unblock umount
+    // https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=267412
+    chdir("/");
+
+    while (true) {
+        XEvent event;
+        XNextEvent(g_display, &event);
+
+        switch (event.type) {
+        case SelectionRequest:
+            #define request event.xselectionrequest
+            if (request.target == TARGETS) { // requestor asking which targets we support
+                Atom targets[] = { TARGETS, UTF8_STRING }; // we support these
+                XChangeProperty(
+                    g_display, request.requestor, request.property,
+                    XA_ATOM, 32,
+                    PropModeReplace,
+                    (unsigned char*)targets, sizeof targets / sizeof targets[0]);
+            } else if (request.target == UTF8_STRING && request.property != None)
+                XChangeProperty(
+                    g_display, request.requestor, request.property,
+                    request.target, 8,
+                    PropModeReplace,
+                    (unsigned char*)data, data_length);
+
+            XSelectionEvent reply = {
+                .type = SelectionNotify,
+                // XSendEvent() will set .serial, .send_event, and .display fields.
+                .requestor = request.requestor,
+                .selection = request.selection,
+                .target    = request.target,
+                .property  = request.property,
+                .time      = request.time,
+            };
+            XSendEvent(g_display, request.requestor, 0, 0, (XEvent*)&reply);
+            XFlush(g_display);
+            #undef request
+            break;
+
+        case SelectionClear: // somebody else claimed ownership
+            exit(EXIT_SUCCESS);
+            break;
+        }
+    }
 }
 
 int main(int argc, char* argv[])
@@ -132,6 +197,7 @@ int main(int argc, char* argv[])
     CLIPBOARD      = XInternAtom(g_display, "CLIPBOARD",      False);
     UTF8_STRING    = XInternAtom(g_display, "UTF8_STRING",    False);
     MINIXCLIPBOARD = XInternAtom(g_display, "MINIXCLIPBOARD", False); // arbitrary
+    TARGETS        = XInternAtom(g_display, "TARGETS",        False);
 
     switch (mode) {
     case INPUT_TO_CLIPBOARD:
