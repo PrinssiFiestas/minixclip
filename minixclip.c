@@ -16,7 +16,7 @@
 #include <errno.h>
 
 Display* g_display;
-Window   g_window; // dummy
+Window   g_window;
 
 Atom CLIPBOARD;      // selection
 Atom UTF8_STRING;    // selection type
@@ -55,7 +55,7 @@ void clipboard_to_output(void)
         switch (event.type) {
         case SelectionNotify:
             goto end_wait;
-        // other applications often handle other events here too
+        // often you might handle other events here too
         }
     }
     end_wait:;
@@ -134,13 +134,13 @@ void input_to_clipboard(const char data[], size_t data_length)
                 // NOTE: ICCCM compliance would require handling MULTIPLE
                 // target, we'll ignore it for brevity.
                 Atom targets[] = { TARGETS, UTF8_STRING }; // we support these
-                XChangeProperty( // store supported targets in requestors property.
+                XChangeProperty( // store supported targets in requestor's property.
                     g_display, request.requestor, request.property,
                     XA_ATOM, 32,
                     PropModeReplace,
                     (unsigned char*)targets, sizeof targets / sizeof targets[0]);
             } else if (request.target == UTF8_STRING && request.property != None) {
-                // requestor asking for the actual data, store it to requestors property.
+                // requestor asking for the actual data, store it to it's property.
                 XChangeProperty(
                     g_display, request.requestor, request.property,
                     request.target, 8,
@@ -166,7 +166,6 @@ void input_to_clipboard(const char data[], size_t data_length)
 
         case SelectionClear: // somebody else claimed clipboard ownership
             exit(EXIT_SUCCESS);
-            break;
         }
     }
 }
